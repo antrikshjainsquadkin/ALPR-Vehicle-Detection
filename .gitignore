@@ -4,5 +4,4 @@ scratch/
 .pytest_cache/
 __pycache__/
 .venv/
-data/test_8414_run.json
-data/test_8426_run.json
+data/test_*_run.json
