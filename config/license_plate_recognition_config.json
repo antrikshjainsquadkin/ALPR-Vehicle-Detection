@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "model_settings": {
+    "detector_weights_path": "models/license_plate_detector.pt",
+    "supported_plate_classes": [
+      "license_plate",
+      "license plate",
+      "number_plate",
+      "number plate",
+      "plate"
+    ],
+    "ocr_engine": "fastplateocr",
+    "ocr_languages": [
+      "en"
+    ],
+    "ocr_model_storage_directory": "models/ocr",
+    "fastplateocr_model_path": "models/ocr/fastplateocr/cct_s_v2_global.onnx",
+    "fastplateocr_config_path": "models/ocr/fastplateocr/cct_s_v2_global_plate_config.yaml",
+    "ppocrv6_det_directory": "models/ocr/ppocrv6/PP-OCRv6_medium_det",
+    "ppocrv6_rec_directory": "models/ocr/ppocrv6/PP-OCRv6_medium_rec",
+    "device": "cpu",
+    "allow_cpu_fallback": true,
+    "detector_input_size": "auto"
+  },
+  "inference_thresholds": {
+    "detector_confidence_threshold": 0.20,
+    "ocr_confidence_threshold": 0.20,
+    "fastplateocr_confidence_threshold": 0.35,
+    "char_low_confidence_threshold": 0.60,
+    "ppocrv6_confidence_threshold": 0.35,
+    "combined_confidence_threshold": 0.20,
+    "box_padding_ratio": 0.06
+  },
+  "plate_validation": {
+    "ocr_allowlist": "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+    "min_plate_length": 4,
+    "max_plate_length": 12,
+    "validation_mode": "accept_if_no_match",
+    "country_patterns": [
+      {
+        "country": "IN_STANDARD",
+        "description": "Standard Indian High Security Registration Plate (e.g., DL01AB1234, MH12DE1433, KA53MH3895)",
+        "regex": "^[A-Z]{2}[0-9]{2}[A-Z]{0,2}[0-9]{4}$",
+        "segments": [
+          {"type": "alpha", "min_len": 2, "max_len": 2},
+          {"type": "numeric", "min_len": 2, "max_len": 2},
+          {"type": "alpha", "min_len": 0, "max_len": 2},
+          {"type": "numeric", "min_len": 4, "max_len": 4}
+        ]
+      },
+      {
+        "country": "GB_STANDARD",
+        "description": "UK Standard Post-2001 Format (e.g., BD51SMR, YG21DBM)",
+        "regex": "^[A-Z]{2}[0-9]{2}[A-Z]{3}$",
+        "segments": [
+          {"type": "alpha", "min_len": 2, "max_len": 2},
+          {"type": "numeric", "min_len": 2, "max_len": 2},
+          {"type": "alpha", "min_len": 3, "max_len": 3}
+        ]
+      },
+      {
+        "country": "INTL_STANDARD_3A4D",
+        "description": "Standard 3-letter 4-digit format (e.g., GAE5379, KBC6233)",
+        "regex": "^[A-Z]{3}[0-9]{4}$",
+        "segments": [
+          {"type": "alpha", "min_len": 3, "max_len": 3},
+          {"type": "numeric", "min_len": 4, "max_len": 4}
+        ]
+      },
+      {
+        "country": "US_GENERIC",
+        "description": "General North American 6-8 alphanumeric sequence",
+        "regex": "^[A-Z0-9]{6,8}$"
+      }
+    ]
+  },
+  "deduplication": {
+    "cooldown_seconds": 30.0
+  },
+  "video_ingestion": {
+    "default_frame_stride": 3,
+    "max_reconnect_attempts": 10,
+    "reconnect_backoff_max_seconds": 30.0,
+    "stream_buffer_size": 1
+  },
+  "persistence": {
+    "ledger_path": "data/recognized_license_plate_records.json"
+  },
+  "logging": {
+    "log_level": "INFO",
+    "verbose": false
+  }
+}
