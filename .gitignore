@@ -1,6 +1,6 @@
 .env
-tests/
-scratch/
+/tests/
+/scratch/
 .pytest_cache/
 __pycache__/
 .venv/
