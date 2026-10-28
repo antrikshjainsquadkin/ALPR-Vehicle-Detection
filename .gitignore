@@ -1,7 +1,10 @@
 .env
-test/
+tests/
 scratch/
 .pytest_cache/
 __pycache__/
 .venv/
-data/test_*_run.json
+
+# Ignore generated test results
+/data/test_8414_run.json
+/data/test_8426_run.json
