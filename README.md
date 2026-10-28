@@ -1,126 +1,198 @@
-# Automatic Vehicle License Plate Recognition (ALPR) System
+# Vehicle Detection and License Plate Recognition
 
-A local-only, offline vehicle detection and license plate recognition system utilizing a verified local YOLOv8 detector and high-performance **FastPlateOCR** (`cct-s-v2-global-model`) recognition engine with character-level confidence scores and confidence-aware multi-frame consensus (with offline PP-OCRv6 and EasyOCR rollback).
+A Python-based computer vision application that detects vehicle license plates from video footage and recognizes their characters using Optical Character Recognition (OCR).
 
-## Key Capabilities
+The application is designed for local execution, with structured JSON files used to store recognized license plate records.
 
-- **High-Performance FastPlateOCR Recognition**:
-  - Employs `cct-s-v2-global-model` on ONNX Runtime CPU (or CUDA).
-  - **Character-Level Confidence**: Every recognized character provides authentic model confidence probabilities (`char_probs`).
-  - **Confidence-Aware Multi-Frame Consensus**: Aggregates repeated observations across video frames using position-aligned weighted voting. Unstable characters are placed in `review_required` rather than silently modified.
-  - **Speed & Efficiency**: Over 30x faster startup and 7x faster inference than legacy EasyOCR.
-- **Multi-Color Plate Recognition**: Reliably detects and classifies plates across color profiles:
-  - **Commercial Yellow Plates** (e.g., Indian HSRP commercial plates such as `KA53MH3895`).
-  - **Electric Vehicle Green Plates** (e.g., standard EV plates such as `GAE 5379`, `KBC 6233`).
-  - **Standard White & Metallic Plates** (e.g., UK post-2001 plates `YG21DBM`, US/NA alphanumeric formats).
-- **False Positive Rejection**: Rejects large non-plate signage (storefront signs, banners, roadside ads) through geometric aspect ratio bounding ($1.05 \le \text{AR} \le 6.5$), maximum physical dimensions ($h \le 20\%$ frame height, $w \le 60\%$ frame width), and structured alphanumeric validation.
-- **Passage Consolidation & Deduplication**: Employs spatial IoU tracking and cost-capped character disambiguation ($\le 2$ substitutions) to consolidate continuous video detections into single passage records, preventing artificial duplicates.
-- **100% Offline & Local**: Zero cloud APIs, telemetry, or network egress.
-- **Atomic Persistence**: Thread-safe atomic JSON ledger with precision ISO 8601 UTC timestamps, per-character confidence scores, and review flags.
+## Features
 
----
+- **License Plate Detection:** Detect license plates in video frames using a YOLO-based detection model.
+- **Optical Character Recognition (OCR):** Extract characters from detected license plates.
+- **Video Processing:** Process video files and inspect detection results.
+- **Live Stream Support:** Process supported RTSP camera streams.
+- **Recognition Records:** Store recognized license plate numbers with timestamps in local JSON files.
+- **Duplicate Reduction:** Use a time-window-based mechanism to reduce repeated records for the same normalized license plate.
+- **Confidence-Based Recognition:** Use available detection and OCR confidence information to help assess recognition results.
+- **Local Execution:** Run the application locally without requiring a cloud inference service or external API at runtime.
+- **Preview Mode:** View video processing and detection results when preview is enabled.
+- **Configurable Models:** Keep model files locally and configure the detection and OCR components for the project environment.
 
-## Launching the Application
+## How It Works
 
-### 1. Interactive Terminal Menu (No Arguments)
-Running the application directly without arguments automatically launches the interactive terminal menu:
+The application follows this processing workflow:
 
-```powershell
-py -3.14 vehicle_license_plate_recognition.py
-# or:
-.\.venv\Scripts\python.exe main.py
+1. **Input Source:** Select a video file or provide a supported RTSP stream.
+2. **Frame Processing:** Read frames from the input source for analysis.
+3. **License Plate Detection:** Run the detection model to locate license plates in each frame.
+4. **Plate Extraction:** Extract the detected plate region for text recognition.
+5. **Text Recognition:** Apply OCR to recognize the characters on the plate.
+6. **Recognition Assessment:** Evaluate the available recognition confidence and handle uncertain results according to the application's implementation.
+7. **Duplicate Handling:** Compare normalized plate text and timestamps to reduce repeated records within the configured time window.
+8. **Record Storage:** Save the resulting plate records to local JSON files.
+9. **Preview and Output:** Display detection results when preview mode is enabled and retain the generated records for later review.
+
+## Technology Stack
+
+- **Python** — Application development
+- **Ultralytics YOLO** — License plate detection
+- **OCR Engine** — License plate text recognition using the OCR engine configured in the project
+- **OpenCV** — Video and image frame processing, where used by the application
+- **JSON** — Local storage of recognition records
+- **PyTorch** — Model inference, where required by the configured detection or OCR components
+
+## Project Structure
+
+```text
+Vehicle-Detection/
+├── vehicle_license_plate_recognition.py
+├── main.py
+├── models/
+│   └── license_plate_detector.pt
+├── data/
+│   └── recognized_license_plate_records.json
+├── requirements.txt
+├── .gitignore
+└── README.md
 ```
 
-#### Main Menu Features:
-- **[1] Process Video File (Browse Dialog...)**: Opens a standard Windows file-picker dialog filtered for video files (`.mp4`, `.avi`, `.mov`, `.mkv`, `.wmv`).
-- **[2] Process Video File (Enter Path Manually)**: Paste an absolute or relative path (quotes and spaces are automatically normalized).
-- **[3] Process Live Camera / Webcam**: Enter a numeric index (e.g., `0` for default USB/built-in camera).
-- **[4] Process RTSP / Network Stream**: Enter a live stream URL (`rtsp://`, `rtmp://`, `http://`, etc.).
-- **[5] Advanced Options & Configuration**:
-  - Live Preview toggle (`--preview`).
-  - Frame sampling stride (`--frame-stride`, default `3`).
-  - OCR Engine switch (`fastplateocr` default, `ppocrv6`, or `easyocr` rollback).
-  - Deduplication cooldown window (`--dedup-seconds`, default `30.0s`).
-  - Detector confidence threshold (`--det-conf`, default `0.20`).
-  - OCR confidence threshold (`--ocr-conf`, default `0.35`).
-  - Inference device (`--device cpu` / `cuda`).
-  - Detector input image size (`--imgsz`, default `auto`).
-- **[6] View Recognized Records Ledger**: Inspect total vehicles detected and recent recognition records in the terminal.
-- **[Q] Exit**: Closes the application cleanly.
+The structure above is illustrative. Actual model files, OCR assets, configuration files, and supporting modules may differ in your local project.
 
----
+## Requirements
 
-### 2. Direct Command Line Ingestion
+- Windows, Linux, or another supported Python environment
+- Python version compatible with the installed project dependencies
+- Git
+- Local license plate detection model
+- Required OCR model files and dependencies
+- Video input file or accessible RTSP stream
 
-Process a video file directly from PowerShell:
+A compatible CPU can be used for inference. GPU acceleration depends on the hardware and installed framework configuration.
+
+## Installation
+
+### 1. Clone the repository
 
 ```powershell
-.\.venv\Scripts\python.exe -u main.py --source "C:\path\to\video.mp4" --preview
+git clone https://github.com/antrikshjainsquadkin/Vehicle-Detection.git
+cd Vehicle-Detection
 ```
 
-Custom ledger path and frame stride:
+### 2. Create a virtual environment
+
 ```powershell
-.\.venv\Scripts\python.exe -u main.py `
-    --source "C:\path\to\video.mp4" `
-    --ledger "data/recognized_license_plate_records.json" `
-    --frame-stride 5 `
-    --preview
+py -m venv .venv
 ```
 
----
+### 3. Activate the virtual environment
 
-## Configuration
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
 
-Settings are maintained in `config/license_plate_recognition_config.json`:
+### 4. Install dependencies
+
+If the repository contains a `requirements.txt` file:
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+If the file does not exist, install the dependencies specified by the project instead of installing arbitrary packages.
+
+### 5. Configure model files
+
+Ensure that the required detection model and OCR model assets are available at the paths expected by the application.
+
+For example:
+
+```text
+models/license_plate_detector.pt
+```
+
+Use the model paths configured in your actual source code.
+
+## Usage
+
+### Process a video file
+
+Run the application with a supported local video file:
+
+```powershell
+python vehicle_license_plate_recognition.py --source "C:\path\to\video.mp4"
+```
+
+### Run with preview enabled
+
+```powershell
+python vehicle_license_plate_recognition.py --source "C:\path\to\video.mp4" --preview
+```
+
+Replace the example path with your actual video path.
+
+### Process an RTSP stream
+
+If the application accepts RTSP URLs through the `--source` argument:
+
+```powershell
+python vehicle_license_plate_recognition.py --source "rtsp://<camera-address>/<stream-path>"
+```
+
+Replace the placeholder with your camera's RTSP address. Do not publish camera credentials or private stream URLs.
+
+**Note:** Available command-line options depend on the arguments implemented in the current application. Check the source code or run the application's supported help command before using additional options.
+
+## Output and Data Storage
+
+Recognition records are stored in local JSON files rather than a database service.
+
+A record may contain information such as:
+
+- Recognized license plate text
+- Detection or recognition timestamp
+- Confidence information, when recorded by the implementation
+- Recognition status or additional observations, when supported
+
+Example of a simplified JSON record:
 
 ```json
 {
-  "schema_version": 1,
-  "inference_thresholds": {
-    "detector_confidence_threshold": 0.20,
-    "ocr_confidence_threshold": 0.20,
-    "ppocrv6_confidence_threshold": 0.35,
-    "combined_confidence_threshold": 0.20,
-    "box_padding_ratio": 0.06
-  },
-  "plate_validation": {
-    "validation_mode": "accept_if_no_match",
-    "country_patterns": [
-      {
-        "country": "IN_STANDARD",
-        "description": "Standard Indian HSRP format",
-        "regex": "^[A-Z]{2}[0-9]{2}[A-Z]{0,2}[0-9]{4}$"
-      },
-      {
-        "country": "GB_STANDARD",
-        "description": "UK Standard Post-2001 format",
-        "regex": "^[A-Z]{2}[0-9]{2}[A-Z]{3}$"
-      },
-      {
-        "country": "INTL_STANDARD_3A4D",
-        "description": "International 3-letter 4-digit format (EV green plates)",
-        "regex": "^[A-Z]{3}[0-9]{4}$"
-      },
-      {
-        "country": "US_GENERIC",
-        "description": "General North American 6-8 alphanumeric format",
-        "regex": "^[A-Z0-9]{6,8}$"
-      }
-    ]
-  }
+  "plate_number": "GJ01AB1234",
+  "timestamp": "2026-10-28T10:30:00",
+  "confidence": 0.92
 }
 ```
 
----
+This example illustrates the format only. Actual field names and values depend on the application's output schema.
 
-## Running Verification Suites
+## Important Notes
 
-To verify regression safety and multi-color detection accuracy:
+- Recognition accuracy depends on image quality, lighting, camera angle, motion blur, and plate visibility.
+- OCR output may contain incorrect characters. Recognition results should be validated where accuracy is critical.
+- Confidence scores indicate model confidence; they do not guarantee that a recognized plate is correct.
+- Model weights and OCR assets may need to be obtained separately, depending on their licensing and repository configuration.
+- Generated test results, temporary files, local environments, and sensitive configuration files should generally remain outside the public repository.
+- Never commit passwords, API tokens, private camera credentials, or other secrets.
 
-```powershell
-# 1. Comprehensive ALPR Regression Suite (7 Checks)
-.\.venv\Scripts\python.exe scratch\test_alpr_regression_suite.py
+## Limitations
 
-# 2. End-to-End Multi-Color & False Positive Verification
-.\.venv\Scripts\python.exe -u scratch\verify_phase_d_e2e.py
-```
+- Small, obstructed, damaged, or blurred license plates may be difficult to recognize.
+- Performance varies with the input resolution, model size, hardware, and video frame rate.
+- Plate formats and recognition rules may need configuration for different countries or regions.
+- Real-world accuracy must be evaluated against correctly labelled test data.
+
+## Future Improvements
+
+Potential improvements include:
+
+- Character-level OCR confidence reporting
+- Multi-frame evidence aggregation
+- Improved handling of uncertain recognition results
+- Support for additional regional license plate formats
+- Performance optimization for CPU-based inference
+- Accuracy evaluation using labelled datasets
+
+These are potential enhancements, not claims that every item is already implemented.
+
+## License
+
+Add the project's selected open-source license here before distributing the code. Verify the licensing terms of the detection model, OCR engine, and model weights separately.
