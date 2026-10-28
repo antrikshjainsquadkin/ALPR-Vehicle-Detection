@@ -6,5 +6,5 @@ __pycache__/
 .venv/
 
 # Ignore generated test results
-/data/test_8414_run.json
-/data/test_8426_run.json
+/data/test_8414_run.csv
+/data/test_8426_run.csv
