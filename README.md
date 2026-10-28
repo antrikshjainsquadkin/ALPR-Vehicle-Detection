@@ -196,6 +196,7 @@ python prepare_local_model_assets.py
 ```
 
 This downloads:
+
 1. `models/license_plate_detector.pt` (~6 MB)
 2. `models/ocr/fastplateocr/cct_s_v2_global.onnx` (~15 MB) and its YAML config
 3. `models/ocr/craft_mlt_25k.pth` and `english_g2.pth` (for EasyOCR rollback)
@@ -246,22 +247,26 @@ python vehicle_license_plate_recognition.py
 
 For headless deployments, batch automation, or scripting, invoke the application directly via arguments:
 
-#### Process a video file with live preview:
+#### Process a video file with live preview
+
 ```powershell
 python vehicle_license_plate_recognition.py --source "C:\path\to\video.mp4" --preview
 ```
 
-#### Process in headless mode with adaptive 1080p resolution and frame sampling stride:
+#### Process in headless mode with adaptive 1080p resolution and frame sampling stride
+
 ```powershell
 python vehicle_license_plate_recognition.py --source "C:\path\to\video.mp4" --frame-stride 3 --imgsz 1920
 ```
 
-#### Process a live RTSP stream with custom deduplication cooldown:
+#### Process a live RTSP stream with custom deduplication cooldown
+
 ```powershell
 python vehicle_license_plate_recognition.py --source "rtsp://camera.local:554/h264" --dedup-seconds 45.0
 ```
 
-#### Run with alternative or rollback OCR engines:
+#### Run with alternative or rollback OCR engines
+
 ```powershell
 # Using PP-OCRv6:
 python vehicle_license_plate_recognition.py --source "video.mp4" --ocr-engine ppocrv6
@@ -283,7 +288,7 @@ python vehicle_license_plate_recognition.py --source "video.mp4" --ocr-engine ea
 | `--ocr-engine` | `str` | `fastplateocr` | Active OCR engine: `fastplateocr` (default), `ppocrv6`, or `easyocr`. |
 | `--det-conf` | `float` | `0.20` | Detection confidence threshold $[0.0 - 1.0]$. |
 | `--ocr-conf` | `float` | `0.35` | OCR acceptance confidence threshold $[0.0 - 1.0]$. |
-| `--dedup-seconds`| `float` | `30.0` | Cooldown period in seconds to suppress duplicate records for the same vehicle. |
+| `--dedup-seconds` | `float` | `30.0` | Cooldown period in seconds to suppress duplicate records for the same vehicle. |
 | `--ledger` | `str` | `data/...` | Custom output path for recognized JSON records. |
 | `--device` | `str` | `cpu` | Hardware device for inference: `cpu` or `cuda`. |
 | `--max-frames` | `int` | `None` | Max frames to process before stopping cleanly (useful for benchmarks and testing). |
@@ -338,7 +343,8 @@ Each vehicle passage record captures comprehensive metadata, including per-chara
 }
 ```
 
-### Key Field Descriptions:
+### Key Field Descriptions
+
 - **`normalized_plate_text`**: Final consensus registration number after character-level voting and pattern-aware disambiguation.
 - **`confidence_score`**: True mean confidence across recognized characters bounded strictly within $[0.0, 1.0]$.
 - **`character_confidences`**: Exact probability distribution for each individual character position.
@@ -395,12 +401,15 @@ System behavior is configured via [`config/license_plate_recognition_config.json
 ## Advanced Engine Capabilities
 
 ### 1. Two-Line / Stacked Plate Recognition
+
 Two-wheelers and commercial carriers often use squarish two-line plates (aspect ratio $1.05 \le \text{AR} \le 2.4$). Standard single-line OCR models fail when fed both lines simultaneously. The engine automatically detects this geometry:
+
 1. Splits the crop into top (54% height) and bottom (56% height) slices with central overlap.
 2. Inferences both segments independently.
 3. Merges the results into a single coherent registration string (e.g., `GJ01X` + `H8398` $\rightarrow$ `GJ01XH8398`).
 
 ### 2. Multi-Frame Trajectory Matching & Sharpness Weighting
+
 Instead of relying on a single snapshot:
 - Vehicles are tracked across frames using spatial IoU, center distance, and prefix matching.
 - Every frame calculates Laplacian variance ($s = \text{Var}(\nabla^2 I)$). Sharp, close-up frames naturally outvote distant, motion-blurred frames.
@@ -418,13 +427,17 @@ Instead of relying on a single snapshot:
   The system automatically suppresses watermarks in the bottom-left quadrant. If your camera has text elsewhere, adjust the detection region or crop bounds in `main.py`.
 - **Running Automated Tests:**
   Verify your local environment at any time using `pytest`:
+
   ```powershell
   python -m pytest
   ```
+
   *(All 45 unit and pipeline integration tests should pass cleanly).*
 
 ---
 
 ## License
 
-This project is licensed under the MIT License. Detection models and OCR weights are subject to their respective upstream licenses.
+This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). See the [LICENSE](LICENSE) file for the full license terms.
+
+Third-party libraries, detection models, OCR engines, and model weights may have separate license terms. Refer to their respective licenses for details.
