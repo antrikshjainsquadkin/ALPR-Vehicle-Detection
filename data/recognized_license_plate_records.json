@@ -1,5 +1,306 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-27T10:24:15.383Z",
-  "records": []
+  "updated_at": "2026-10-28T13:06:41.308Z",
+  "records": [
+    {
+      "event_id": "8bb3d28c-36ab-4f7b-a58f-5738fb4b685c",
+      "timestamp": "2026-10-28T13:06:37.890Z",
+      "detected_plate_text": "GJ27EJ7380",
+      "normalized_plate_text": "GJ27EJ7280",
+      "confidence_score": 0.3663,
+      "detector_confidence": 0.8961,
+      "ocr_confidence": 0.3663,
+      "ocr_engine": "easyocr",
+      "character_confidences": [
+        {
+          "char": "G",
+          "confidence": 0.3663
+        },
+        {
+          "char": "J",
+          "confidence": 0.3663
+        },
+        {
+          "char": "2",
+          "confidence": 0.3663
+        },
+        {
+          "char": "7",
+          "confidence": 0.3498
+        },
+        {
+          "char": "E",
+          "confidence": 0.3663
+        },
+        {
+          "char": "J",
+          "confidence": 0.3663
+        },
+        {
+          "char": "7",
+          "confidence": 0.3925
+        },
+        {
+          "char": "2",
+          "confidence": 0.3565
+        },
+        {
+          "char": "8",
+          "confidence": 0.3663
+        },
+        {
+          "char": "0",
+          "confidence": 0.3663
+        }
+      ],
+      "min_character_confidence": 0.3498,
+      "review_required": [
+        "G",
+        "J",
+        "2",
+        "7",
+        "E",
+        "8",
+        "0"
+      ],
+      "matched_country_pattern": "IN_STANDARD",
+      "disambiguation_applied": false,
+      "plate_color": "WHITE",
+      "source_id": "VID20261027092642.mp4",
+      "frame_index": 90,
+      "bounding_box": [
+        1863,
+        839,
+        1995,
+        875
+      ],
+      "observations_count": 3,
+      "last_frame_index": 96,
+      "last_observed_timestamp": "2026-10-28T13:06:41.308Z",
+      "candidate_readings": [
+        {
+          "raw": "GJ27EJ2280",
+          "plate": "GJ27EJ2280",
+          "conf": 0.3138,
+          "frame": 90,
+          "color": "WHITE",
+          "sharpness": 598.09,
+          "char_probs": [
+            0.3138,
+            0.3138,
+            0.3138,
+            0.3138,
+            0.3138,
+            0.3138,
+            0.3138,
+            0.3138,
+            0.3138,
+            0.3138
+          ],
+          "character_confidences": [
+            {
+              "char": "G",
+              "confidence": 0.3138
+            },
+            {
+              "char": "J",
+              "confidence": 0.3138
+            },
+            {
+              "char": "2",
+              "confidence": 0.3138
+            },
+            {
+              "char": "7",
+              "confidence": 0.3138
+            },
+            {
+              "char": "E",
+              "confidence": 0.3138
+            },
+            {
+              "char": "J",
+              "confidence": 0.3138
+            },
+            {
+              "char": "2",
+              "confidence": 0.3138
+            },
+            {
+              "char": "2",
+              "confidence": 0.3138
+            },
+            {
+              "char": "8",
+              "confidence": 0.3138
+            },
+            {
+              "char": "0",
+              "confidence": 0.3138
+            }
+          ],
+          "review_required": [
+            "G",
+            "J",
+            "2",
+            "7",
+            "E",
+            "J",
+            "2",
+            "2",
+            "8",
+            "0"
+          ]
+        },
+        {
+          "raw": "GJZZEJ7280",
+          "plate": "GJ22EJ7280",
+          "conf": 0.3991,
+          "frame": 93,
+          "color": "WHITE",
+          "sharpness": 833.52,
+          "char_probs": [
+            0.3991,
+            0.3991,
+            0.3991,
+            0.3991,
+            0.3991,
+            0.3991,
+            0.3991,
+            0.3991,
+            0.3991,
+            0.3991
+          ],
+          "character_confidences": [
+            {
+              "char": "G",
+              "confidence": 0.3991
+            },
+            {
+              "char": "J",
+              "confidence": 0.3991
+            },
+            {
+              "char": "Z",
+              "confidence": 0.3991
+            },
+            {
+              "char": "Z",
+              "confidence": 0.3991
+            },
+            {
+              "char": "E",
+              "confidence": 0.3991
+            },
+            {
+              "char": "J",
+              "confidence": 0.3991
+            },
+            {
+              "char": "7",
+              "confidence": 0.3991
+            },
+            {
+              "char": "2",
+              "confidence": 0.3991
+            },
+            {
+              "char": "8",
+              "confidence": 0.3991
+            },
+            {
+              "char": "0",
+              "confidence": 0.3991
+            }
+          ],
+          "review_required": [
+            "G",
+            "J",
+            "Z",
+            "Z",
+            "E",
+            "J",
+            "7",
+            "2",
+            "8",
+            "0"
+          ]
+        },
+        {
+          "raw": "GJ27EJ7380",
+          "plate": "GJ27EJ7380",
+          "conf": 0.3859,
+          "frame": 96,
+          "color": "WHITE",
+          "sharpness": 1016.21,
+          "char_probs": [
+            0.3859,
+            0.3859,
+            0.3859,
+            0.3859,
+            0.3859,
+            0.3859,
+            0.3859,
+            0.3859,
+            0.3859,
+            0.3859
+          ],
+          "character_confidences": [
+            {
+              "char": "G",
+              "confidence": 0.3859
+            },
+            {
+              "char": "J",
+              "confidence": 0.3859
+            },
+            {
+              "char": "2",
+              "confidence": 0.3859
+            },
+            {
+              "char": "7",
+              "confidence": 0.3859
+            },
+            {
+              "char": "E",
+              "confidence": 0.3859
+            },
+            {
+              "char": "J",
+              "confidence": 0.3859
+            },
+            {
+              "char": "7",
+              "confidence": 0.3859
+            },
+            {
+              "char": "3",
+              "confidence": 0.3859
+            },
+            {
+              "char": "8",
+              "confidence": 0.3859
+            },
+            {
+              "char": "0",
+              "confidence": 0.3859
+            }
+          ],
+          "review_required": [
+            "G",
+            "J",
+            "2",
+            "7",
+            "E",
+            "J",
+            "7",
+            "3",
+            "8",
+            "0"
+          ]
+        }
+      ]
+    }
+  ]
 }

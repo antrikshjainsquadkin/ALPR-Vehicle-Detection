@@ -13,6 +13,7 @@ Core Architectural Principles:
 
 import argparse
 import atexit
+import csv
 import ctypes
 import json
 import os
@@ -426,6 +427,263 @@ def atomic_replace_json(target_path: str, data: Dict[str, Any]):
         raise e
 
 
+CONFIRMED_CSV_COLUMNS: List[str] = [
+    "event_id",
+    "timestamp",
+    "last_observed_timestamp",
+    "confirmed_plate_number",
+    "overall_confidence",
+    "character_confidences",
+    "min_character_confidence",
+    "plate_color",
+    "matched_country_pattern",
+    "observations_count",
+    "source_id",
+    "frame_index",
+    "last_frame_index",
+    "review_required",
+]
+
+
+def load_csv_records(csv_path: str) -> List[Dict[str, str]]:
+    """Safely load existing confirmed CSV detection records.
+    Handles missing or zero-byte files cleanly without throwing exceptions.
+    """
+    if not os.path.exists(csv_path) or os.path.getsize(csv_path) == 0:
+        return []
+    records: List[Dict[str, str]] = []
+    try:
+        with open(csv_path, "r", encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            if not reader.fieldnames:
+                return []
+            for row in reader:
+                if row:
+                    records.append(dict(row))
+    except Exception as e:
+        print(f"[ALPR WARNING] Could not read existing CSV at '{csv_path}': {e}", file=sys.stderr)
+        return []
+    return records
+
+
+def atomic_replace_csv(target_path: str, records: List[Dict[str, Any]], fieldnames: Optional[List[str]] = None):
+    """Crash-resilient CSV persistence using same-directory temporary file + fsync + os.replace.
+    Ensures safe, atomic writes with proper RFC 4180 escaping and no corrupt partial rows.
+    """
+    fields = fieldnames or CONFIRMED_CSV_COLUMNS
+    target_dir = os.path.dirname(os.path.abspath(target_path))
+    os.makedirs(target_dir, exist_ok=True)
+
+    with tempfile.NamedTemporaryFile("w", dir=target_dir, delete=False, encoding="utf-8", newline="", suffix=".tmp") as tf:
+        temp_name = tf.name
+        writer = csv.DictWriter(tf, fieldnames=fields, quoting=csv.QUOTE_MINIMAL)
+        writer.writeheader()
+        for r in records:
+            row_dict: Dict[str, str] = {}
+            for col in fields:
+                val = r.get(col, "")
+                if col == "character_confidences":
+                    if isinstance(val, (list, dict)):
+                        val = json.dumps(val, ensure_ascii=False, separators=(',', ':'))
+                    elif not val:
+                        val = "[]"
+                elif col == "review_required":
+                    if isinstance(val, list):
+                        val = ",".join(str(x) for x in val)
+                    elif not val:
+                        val = ""
+                elif col in ("overall_confidence", "min_character_confidence"):
+                    if isinstance(val, (int, float)):
+                        val = f"{float(val):.4f}"
+                row_dict[col] = str(val) if val is not None else ""
+            writer.writerow(row_dict)
+        tf.flush()
+        os.fsync(tf.fileno())
+
+    try:
+        os.replace(temp_name, target_path)
+    except Exception as e:
+        if os.path.exists(temp_name):
+            try:
+                os.remove(temp_name)
+            except OSError:
+                pass
+        raise e
+
+
+def upsert_confirmed_csv_record(
+    csv_path: str,
+    record: Dict[str, Any],
+    fieldnames: Optional[List[str]] = None,
+) -> bool:
+    """Upsert a single confirmed plate record into the final results CSV file.
+    Matches existing rows by event_id to prevent duplicates when stronger consensus updates occur.
+    """
+    fields = fieldnames or CONFIRMED_CSV_COLUMNS
+    existing_records = load_csv_records(csv_path)
+
+    event_id = str(record.get("event_id", ""))
+    norm_plate = record.get("normalized_plate_text", "")
+    src_id = record.get("source_id", "")
+    f_idx = record.get("frame_index")
+
+    char_confs = record.get("character_confidences", [])
+    if isinstance(char_confs, list):
+        norm_char_confs = []
+        for item in char_confs:
+            if isinstance(item, dict):
+                norm_char_confs.append({
+                    "char": str(item.get("char", "")),
+                    "confidence": round(min(1.0, max(0.0, float(item.get("confidence", 0.0)))), 4)
+                })
+            else:
+                norm_char_confs.append(item)
+        char_confs_str = json.dumps(norm_char_confs, ensure_ascii=False, separators=(',', ':'))
+    elif isinstance(char_confs, dict):
+        char_confs_str = json.dumps(char_confs, ensure_ascii=False, separators=(',', ':'))
+    else:
+        char_confs_str = str(char_confs or "[]")
+
+    rev_req = record.get("review_required", [])
+    rev_str = ",".join(str(x) for x in rev_req) if isinstance(rev_req, list) else str(rev_req or "")
+
+    overall_c = min(1.0, max(0.0, float(record.get("confidence_score", 0.0))))
+    min_c = min(1.0, max(0.0, float(record.get("min_character_confidence", overall_c))))
+
+    new_row: Dict[str, Any] = {
+        "event_id": event_id,
+        "timestamp": record.get("timestamp", ""),
+        "last_observed_timestamp": record.get("last_observed_timestamp", record.get("timestamp", "")),
+        "confirmed_plate_number": norm_plate,
+        "overall_confidence": f"{float(overall_c):.4f}",
+        "character_confidences": char_confs_str,
+        "min_character_confidence": f"{float(min_c):.4f}",
+        "plate_color": record.get("plate_color", ""),
+        "matched_country_pattern": record.get("matched_country_pattern", "") or "",
+        "observations_count": str(record.get("observations_count", 1)),
+        "source_id": str(src_id),
+        "frame_index": str(f_idx) if f_idx is not None else "",
+        "last_frame_index": str(record.get("last_frame_index", f_idx or "")),
+        "review_required": rev_str,
+    }
+
+    matched_idx = -1
+    for idx, row in enumerate(existing_records):
+        if event_id and row.get("event_id") == event_id:
+            matched_idx = idx
+            break
+        if not event_id and row.get("source_id") == str(src_id) and row.get("frame_index") == str(f_idx):
+            matched_idx = idx
+            break
+
+    if matched_idx >= 0:
+        existing_records[matched_idx] = new_row
+    else:
+        existing_records.append(new_row)
+
+    atomic_replace_csv(csv_path, existing_records, fields)
+    return True
+
+
+def is_record_confirmed(record: Dict[str, Any], config: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
+    """Conservative confirmation decision for ALPR detection records.
+    Combines multi-frame observation count, character-level confidences, overall confidence,
+    and format validation to ensure only sufficiently accurate, best-supported plates are saved to CSV.
+    Returns (is_confirmed, reason).
+    """
+    if not record or not isinstance(record, dict):
+        return False, "Empty or invalid record object"
+
+    plate = record.get("normalized_plate_text", "").strip()
+    if not plate:
+        return False, "Missing or empty plate string"
+
+    cfg = (config or {}).get("confirmation", {})
+    min_obs = cfg.get("min_observations", 2)
+    min_conf = cfg.get("min_confidence", 0.55)
+    single_min_conf = cfg.get("single_frame_min_confidence", 0.88)
+    min_char_conf = cfg.get("min_char_confidence", 0.20)
+    max_review = cfg.get("max_review_chars", 3)
+    unval_min_conf = cfg.get("unvalidated_min_confidence", 0.70)
+    unval_min_obs = cfg.get("unvalidated_min_observations", 3)
+    min_len = cfg.get("min_plate_length", 4)
+    max_len = cfg.get("max_plate_length", 12)
+
+    if len(plate) < min_len or len(plate) > max_len:
+        return False, f"Plate length {len(plate)} outside allowable range [{min_len}, {max_len}]"
+
+    obs_count = int(record.get("observations_count", 1))
+    overall_conf = float(record.get("confidence_score", 0.0))
+    country = record.get("matched_country_pattern")
+    has_valid_format = bool(country and country != "US_GENERIC")
+    review_chars = record.get("review_required", []) or []
+    min_c_conf = float(record.get("min_character_confidence", overall_conf))
+
+    # Reject if excessive characters require human review
+    if len(review_chars) > max_review:
+        return False, f"Too many uncertain characters ({len(review_chars)} > {max_review})"
+
+    # Minimum individual character confidence boundary
+    if min_c_conf < min_char_conf:
+        return False, f"Lowest character confidence ({min_c_conf:.2f}) below threshold ({min_char_conf:.2f})"
+
+    # Single-observation rule: conservative requirement
+    if obs_count < min_obs:
+        if obs_count == 1 and has_valid_format and overall_conf >= single_min_conf and len(review_chars) == 0:
+            return True, f"High-confidence single observation ({overall_conf:.2f}) with verified national format ({country})"
+        return False, f"Insufficient observations ({obs_count} < {min_obs}) for confidence {overall_conf:.2f}"
+
+    # Multi-observation rule
+    if has_valid_format:
+        if overall_conf >= min_conf:
+            return True, f"Confirmed across {obs_count} frames with format {country} (conf: {overall_conf:.2f})"
+        else:
+            return False, f"Confidence {overall_conf:.2f} below minimum {min_conf:.2f} despite format match {country}"
+    else:
+        # Without verified national format, require stronger multi-frame evidence
+        if obs_count >= unval_min_obs and overall_conf >= unval_min_conf:
+            return True, f"Confirmed across {obs_count} frames without national format (conf: {overall_conf:.2f})"
+        else:
+            return False, f"Unvalidated format requires {unval_min_obs} obs and {unval_min_conf:.2f} conf (got {obs_count} obs, {overall_conf:.2f} conf)"
+
+
+def align_candidate_to_reference(
+    target_str: str, query_str: str, query_confs: List[Dict[str, Any]]
+) -> List[Optional[Tuple[str, float]]]:
+    """Align query string against reference target string using dynamic programming edit distance.
+    Returns list of length len(target_str) where each element is (char, confidence) or None.
+    Handles missing or inserted characters without blindly shifting character positions.
+    """
+    n, m = len(target_str), len(query_str)
+    if n == 0 or m == 0:
+        return [None] * n
+
+    dp = [[0] * (m + 1) for _ in range(n + 1)]
+    for i in range(n + 1):
+        dp[i][0] = -i
+    for j in range(m + 1):
+        dp[0][j] = -j
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            score = 2 if target_str[i - 1] == query_str[j - 1] else -1
+            dp[i][j] = max(dp[i - 1][j - 1] + score, dp[i - 1][j] - 1, dp[i][j - 1] - 1)
+
+    i, j = n, m
+    aligned_query: Dict[int, Tuple[str, float]] = {}
+    while i > 0 or j > 0:
+        if i > 0 and j > 0 and dp[i][j] == dp[i - 1][j - 1] + (2 if target_str[i - 1] == query_str[j - 1] else -1):
+            conf = float(query_confs[j - 1]["confidence"]) if j - 1 < len(query_confs) else 0.5
+            aligned_query[i - 1] = (query_str[j - 1], conf)
+            i -= 1
+            j -= 1
+        elif i > 0 and (j == 0 or dp[i][j] == dp[i - 1][j] - 1):
+            i -= 1
+        else:
+            j -= 1
+
+    return [aligned_query.get(idx) for idx in range(n)]
+
+
 DEFAULT_CONFIG: Dict[str, Any] = {
     "schema_version": 1,
     "model_settings": {
@@ -506,6 +764,18 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     },
     "persistence": {
         "ledger_path": "data/recognized_license_plate_records.json",
+        "confirmed_csv_path": "data/confirmed_license_plate_records.csv",
+    },
+    "confirmation": {
+        "min_observations": 2,
+        "min_confidence": 0.55,
+        "single_frame_min_confidence": 0.88,
+        "min_char_confidence": 0.20,
+        "max_review_chars": 3,
+        "unvalidated_min_confidence": 0.70,
+        "unvalidated_min_observations": 3,
+        "min_plate_length": 4,
+        "max_plate_length": 12,
     },
     "logging": {
         "log_level": "INFO",
@@ -1049,25 +1319,61 @@ def compute_multiframe_consensus(
         matching_candidates = candidates
         target_length = len(candidates[-1].get("plate", ""))
 
+    reference_cand = max(matching_candidates, key=lambda c: float(c.get("conf", 0.5)))
+    reference_str = reference_cand.get("plate", "")
+
+    # Pre-align all candidates whose length is within +/- 2 of target_length
+    aligned_candidate_entries: List[Tuple[Dict[str, Any], List[Optional[Tuple[str, float]]], float]] = []
+
+    # Sort candidates by frame to compute temporal discounting
+    sorted_candidates = sorted(candidates, key=lambda c: c.get("frame", 0))
+    prev_frame = -999
+    prev_plate = ""
+    identical_count = 0
+
+    for c in sorted_candidates:
+        p = c.get("plate", "")
+        if not p:
+            continue
+        c_frame = c.get("frame", 0)
+
+        # Temporal discounting for repeated near-identical adjacent frames
+        if p == prev_plate and abs(c_frame - prev_frame) <= 3:
+            identical_count += 1
+            temporal_factor = 1.0 / (1.0 + 0.3 * identical_count)
+        else:
+            identical_count = 0
+            temporal_factor = 1.0
+        prev_frame = c_frame
+        prev_plate = p
+
+        c_confs = c.get("character_confidences", [])
+        if len(p) == target_length:
+            chars_aligned: List[Optional[Tuple[str, float]]] = []
+            for idx, ch in enumerate(p):
+                conf_val = float(c_confs[idx].get("confidence", c.get("conf", 0.5))) if idx < len(c_confs) else float(c.get("conf", 0.5))
+                chars_aligned.append((ch, conf_val))
+            aligned_candidate_entries.append((c, chars_aligned, temporal_factor))
+        elif abs(len(p) - target_length) <= 2:
+            chars_aligned = align_candidate_to_reference(reference_str, p, c_confs)
+            aligned_candidate_entries.append((c, chars_aligned, temporal_factor))
+
     consensus_chars: List[str] = []
     consensus_confs: List[float] = []
     review_flags: List[str] = []
 
     for i in range(target_length):
         char_votes: Dict[str, List[Tuple[float, float]]] = {}
-        for c in matching_candidates:
-            p = c.get("plate", "")
-            if i >= len(p):
+        for c, aligned_chars, temporal_factor in aligned_candidate_entries:
+            if i >= len(aligned_chars) or aligned_chars[i] is None:
                 continue
-            char_at_i = p[i]
-            c_confs = c.get("character_confidences", [])
-            if c_confs and i < len(c_confs):
-                c_conf = float(c_confs[i].get("confidence", c.get("conf", 0.5)))
-            else:
-                c_conf = float(c.get("conf", 0.5))
+            item = aligned_chars[i]
+            if item is None:
+                continue
+            char_at_i, c_conf = item
             sharpness = float(c.get("sharpness", 0.0))
             sharp_factor = 1.0 + min(1.0, sharpness / 1000.0) if sharpness > 0 else 1.0
-            vote_weight = c_conf * sharp_factor
+            vote_weight = c_conf * sharp_factor * temporal_factor
             char_votes.setdefault(char_at_i, []).append((vote_weight, c_conf))
 
         if not char_votes:
@@ -1176,6 +1482,17 @@ def run_pipeline(args):
     ledger_path = os.path.abspath(args.ledger if args.ledger else os.path.join(data_dir, "recognized_license_plate_records.json"))
     ledger_data, dedup_cache = load_and_validate_ledger(ledger_path)
 
+    csv_arg = getattr(args, "csv_path", None)
+    if csv_arg:
+        csv_path = os.path.abspath(csv_arg)
+    else:
+        cfg_csv = config.get("persistence", {}).get("confirmed_csv_path")
+        if cfg_csv and not getattr(args, "ledger", None):
+            csv_path = os.path.abspath(cfg_csv if os.path.isabs(cfg_csv) else os.path.join(base_dir, cfg_csv))
+        else:
+            base_l, _ = os.path.splitext(ledger_path)
+            csv_path = base_l + ".csv"
+
     # 3. Model assets resolution
     model_settings = config.get("model_settings", {})
     weights_arg = getattr(args, "weights", None)
@@ -1255,7 +1572,8 @@ def run_pipeline(args):
     cooldown_seconds = args.dedup_seconds if args.dedup_seconds is not None else config.get("deduplication", {}).get("cooldown_seconds", 30.0)
 
     print(f"[ALPR] System ready. Source: '{args.source}' | Stride: {frame_stride} | Cooldown: {cooldown_seconds}s", flush=True)
-    print(f"[ALPR] Persisting records to: {ledger_path}", flush=True)
+    print(f"[ALPR] Internal candidate ledger: {ledger_path}", flush=True)
+    print(f"[ALPR] Confirmed final results CSV: {csv_path}", flush=True)
     if args.preview:
         print("[ALPR] Live preview enabled. Press 'q' or 'ESC' on the preview window to exit.", flush=True)
 
@@ -1714,16 +2032,25 @@ def run_pipeline(args):
                     except Exception as e:
                         sys.exit(f"[ALPR FATAL] Ledger persistence failed: {e}. Stopping to preserve data integrity.")
 
-                    if matched_record["observations_count"] == 2:
-                        c_info = f"({matched_record.get('matched_country_pattern')})" if matched_record.get('matched_country_pattern') else ""
-                        color_str = f" [{matched_record.get('plate_color')}]" if matched_record.get('plate_color') else ""
-                        char_scores_repr = " ".join([f"{c['char']}:{int(round(c['confidence'] * 100))}%" for c in matched_record.get("character_confidences", [])])
-                        review_repr = f" | Review required: {', '.join(matched_record['review_required'])}" if matched_record.get("review_required") else ""
-                        print(
-                            f"[CONFIRMED RECORD] Vehicle passage confirmed: '{matched_record['normalized_plate_text']}' {c_info}{color_str} | "
-                            f"Observations: {matched_record['observations_count']} | Scores: {char_scores_repr}{review_repr} | Frame: {frame_index}",
-                            flush=True,
-                        )
+                    # Conservative confirmation decision for CSV storage
+                    is_conf, conf_reason = is_record_confirmed(matched_record, config)
+                    if is_conf:
+                        try:
+                            upsert_confirmed_csv_record(csv_path, matched_record)
+                        except Exception as e:
+                            print(f"[ALPR WARNING] Failed to persist confirmed record to CSV '{csv_path}': {e}", file=sys.stderr)
+
+                        if matched_record.get("_confirmed_logged") != matched_record["normalized_plate_text"]:
+                            matched_record["_confirmed_logged"] = matched_record["normalized_plate_text"]
+                            c_info = f"({matched_record.get('matched_country_pattern')})" if matched_record.get('matched_country_pattern') else ""
+                            color_str = f" [{matched_record.get('plate_color')}]" if matched_record.get('plate_color') else ""
+                            char_scores_repr = " ".join([f"{c['char']}:{int(round(c['confidence'] * 100))}%" for c in matched_record.get("character_confidences", [])])
+                            review_repr = f" | Review required: {', '.join(matched_record['review_required'])}" if matched_record.get("review_required") else ""
+                            print(
+                                f"[CONFIRMED RECORD] Vehicle passage confirmed: '{matched_record['normalized_plate_text']}' {c_info}{color_str} | "
+                                f"Observations: {matched_record['observations_count']} | Scores: {char_scores_repr}{review_repr} | CSV: '{os.path.basename(csv_path)}' | Frame: {frame_index}",
+                                flush=True,
+                            )
 
                     preview_labels.append((x1, y1, x2, y2, f"{matched_record['normalized_plate_text']} [{matched_record.get('plate_color', 'PLATE')}] [PASSAGE #{matched_record['observations_count']}]", (0, 255, 0)))
                     continue
@@ -1772,6 +2099,15 @@ def run_pipeline(args):
                     ledger_data["records"].pop()
                     sys.exit(f"[ALPR FATAL] Ledger persistence failed: {e}. Stopping to preserve data integrity.")
 
+                # Conservative confirmation decision for CSV storage
+                is_conf, conf_reason = is_record_confirmed(new_record, config)
+                if is_conf:
+                    try:
+                        upsert_confirmed_csv_record(csv_path, new_record)
+                        new_record["_confirmed_logged"] = new_record["normalized_plate_text"]
+                    except Exception as e:
+                        print(f"[ALPR WARNING] Failed to persist confirmed record to CSV '{csv_path}': {e}", file=sys.stderr)
+
                 dedup_cache[normalized_plate] = now_utc
 
                 country_info = f"({matched_country})" if matched_country else ""
@@ -1782,11 +2118,19 @@ def run_pipeline(args):
                     char_scores_str = " | Chars: " + " ".join([f"{c['char']}:{int(round(c['confidence'] * 100))}%" for c in selected_char_confs])
                 if review_flags:
                     char_scores_str += f" | Review required: {', '.join(review_flags)}"
-                print(
-                    f"[PASSAGE OBSERVATION] Plate candidate: '{normalized_plate}' {country_info}{disambig_info}{color_info} | "
-                    f"OCR: {ocr_conf:.2f} (Det: {det_conf:.2f}){char_scores_str} | Frame: {frame_index} | Time: {new_record['timestamp']}",
-                    flush=True,
-                )
+
+                if is_conf:
+                    print(
+                        f"[CONFIRMED RECORD] Single-frame high-confidence confirmed: '{normalized_plate}' {country_info}{disambig_info}{color_info} | "
+                        f"OCR: {ocr_conf:.2f} (Det: {det_conf:.2f}){char_scores_str} | CSV: '{os.path.basename(csv_path)}' | Frame: {frame_index}",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"[PASSAGE OBSERVATION] Plate candidate: '{normalized_plate}' {country_info}{disambig_info}{color_info} | "
+                        f"OCR: {ocr_conf:.2f} (Det: {det_conf:.2f}){char_scores_str} | Frame: {frame_index} | (Unconfirmed, tracking evidence)",
+                        flush=True,
+                    )
                 preview_labels.append((x1, y1, x2, y2, f"Plate: {normalized_plate} [{detected_color}] ({combined_score:.2f})", (0, 255, 0)))
 
             # Optional OpenCV Preview
@@ -1823,7 +2167,8 @@ def run_pipeline(args):
             except Exception:
                 pass
         release_instance_lock()
-        print(f"[ALPR] Run complete. Total unique vehicle passages stored: {len(ledger_data.get('records', []))}", flush=True)
+        confirmed_count = len(load_csv_records(csv_path))
+        print(f"[ALPR] Run complete. Total tracked passages in JSON: {len(ledger_data.get('records', []))} | Confirmed plates in CSV: {confirmed_count}", flush=True)
 
 
 def build_arg_parser():
@@ -1835,6 +2180,7 @@ def build_arg_parser():
     parser.add_argument("--source", required=True, help="Input source: video file path, webcam index, or RTSP/stream URL.")
     parser.add_argument("--config", default=None, help="Path to custom JSON configuration file.")
     parser.add_argument("--ledger", default=None, help="Path to custom recognized records JSON ledger.")
+    parser.add_argument("--csv-path", default=None, help="Path to custom confirmed records CSV file. Default: derived from ledger path or config.")
     parser.add_argument("--weights", default=None, help="Path to custom YOLO detector weights.")
     parser.add_argument("--ocr-engine", choices=["fastplateocr", "ppocrv6", "easyocr"], default=None, help="OCR engine to use: 'fastplateocr' (default primary), 'ppocrv6', or 'easyocr' (rollback).")
     parser.add_argument("--fastplateocr-model", default=None, help="Path to offline FastPlateOCR ONNX model file (.onnx).")
@@ -1929,40 +2275,45 @@ def get_default_menu_settings() -> Dict[str, Any]:
 
 
 def show_ledger_summary(base_dir: str):
-    """Display summary of stored license plate records from JSON ledger."""
+    """Display summary of stored license plate records from both confirmed CSV and internal JSON ledger."""
+    csv_path = os.path.join(base_dir, "data", "confirmed_license_plate_records.csv")
     ledger_path = os.path.join(base_dir, "data", "recognized_license_plate_records.json")
-    print("\n" + "=" * 72)
-    print("                 Recognized License Plate Records Ledger                ")
-    print("=" * 72)
-    if not os.path.exists(ledger_path):
-        print(f"Ledger file not found at: '{ledger_path}'")
-        pause_menu()
-        return
+    print("\n" + "=" * 76)
+    print("                 ALPR Detection Records & Persistence Ledger            ")
+    print("=" * 76)
 
-    try:
-        with open(ledger_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        records = data.get("records", [])
-        print(f"Ledger Path:   {ledger_path}")
-        print(f"Last Updated:  {data.get('updated_at', 'unknown')}")
-        print(f"Total Records: {len(records)}\n")
+    # 1. Confirmed CSV
+    print(f"Confirmed CSV Output: {csv_path}")
+    csv_records = load_csv_records(csv_path)
+    print(f"Total Confirmed Passes in CSV: {len(csv_records)}")
+    if csv_records:
+        print("-" * 76)
+        print(f"{'#':<3} | {'Confirmed Plate':<14} | {'Format':<14} | {'Conf':<6} | {'Obs':<4} | Timestamp")
+        print("-" * 76)
+        for idx, r in enumerate(csv_records[-10:], start=1):
+            p = r.get("confirmed_plate_number", "")
+            fmt = r.get("matched_country_pattern", "N/A")
+            c = r.get("overall_confidence", "0.0")
+            obs = r.get("observations_count", "1")
+            ts = r.get("timestamp", "")
+            print(f"{idx:<3} | {p:<14} | {fmt:<14} | {c:<6} | {obs:<4} | {ts}")
+    else:
+        print("  (No confirmed CSV records recorded yet.)")
 
-        if records:
-            print(f"{'#':<4} | {'Plate':<12} | {'Country':<12} | {'Conf':<6} | {'Obs':<6} | {'Source':<18} | Timestamp")
-            print("-" * 72)
-            recent_records = records[-15:]
-            for idx, r in enumerate(recent_records, start=1):
-                country = r.get("matched_country_pattern") or "N/A"
-                conf = r.get("confidence_score", 0.0)
-                obs = r.get("observations_count", 0)
-                src = os.path.basename(r.get("source_id", "unknown"))
-                ts = r.get("timestamp", "unknown")
-                plate = r.get("normalized_plate_text", "")
-                print(f"{idx:<4} | {plate:<12} | {country:<12} | {conf:<6.2f} | {obs:<6} | {src:<18} | {ts}")
-        else:
-            print("No vehicle passage records found in ledger (empty).")
-    except Exception as e:
-        print(f"[ERROR] Could not parse ledger JSON: {e}")
+    print("\n" + "-" * 76)
+    # 2. Internal JSON Ledger
+    print(f"Internal JSON State:  {ledger_path}")
+    if os.path.exists(ledger_path):
+        try:
+            with open(ledger_path, "r", encoding="utf-8") as f:
+                j_data = json.load(f)
+            j_recs = j_data.get("records", [])
+            print(f"Total Ingestion Candidates Tracked in JSON: {len(j_recs)}")
+        except Exception as e:
+            print(f"  [Error reading JSON ledger: {e}]")
+    else:
+        print("  (Internal JSON ledger not yet created.)")
+    print("=" * 76)
 
     pause_menu()
 
@@ -2206,6 +2557,7 @@ def _execute_menu_run(source: str, settings: Dict[str, Any]):
         source=source,
         config=None,
         ledger=None,
+        csv_path=None,
         weights=None,
         ocr_engine=settings["ocr_engine"],
         fastplateocr_model=None,

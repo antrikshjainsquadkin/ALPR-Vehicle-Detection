@@ -282,6 +282,8 @@ python vehicle_license_plate_recognition.py --source "video.mp4" --ocr-engine ea
 | Flag | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `--source` | `str` | *Required* | Path to video file, integer webcam index (`0`), or RTSP/stream URL. |
+| `--csv-path` | `str` | `data/...` | Custom output path for final confirmed CSV detection records. |
+| `--ledger` | `str` | `data/...` | Custom output path for internal JSON candidate tracking ledger. |
 | `--preview` | `flag` | `False` | Display live OpenCV preview window with tracking bounding boxes and metadata. |
 | `--frame-stride` | `int` | `3` | Process every $N$-th frame (improves CPU throughput on high-fps feeds). |
 | `--imgsz` | `int` | `auto` | YOLO detector input resolution (`640`, `1280`, `1920`). `auto` selects 1920 for 1080p feeds. |
@@ -289,18 +291,99 @@ python vehicle_license_plate_recognition.py --source "video.mp4" --ocr-engine ea
 | `--det-conf` | `float` | `0.20` | Detection confidence threshold $[0.0 - 1.0]$. |
 | `--ocr-conf` | `float` | `0.35` | OCR acceptance confidence threshold $[0.0 - 1.0]$. |
 | `--dedup-seconds` | `float` | `30.0` | Cooldown period in seconds to suppress duplicate records for the same vehicle. |
-| `--ledger` | `str` | `data/...` | Custom output path for recognized JSON records. |
 | `--device` | `str` | `cpu` | Hardware device for inference: `cpu` or `cuda`. |
 | `--max-frames` | `int` | `None` | Max frames to process before stopping cleanly (useful for benchmarks and testing). |
 | `--config` | `str` | `config/...` | Path to custom JSON configuration file. |
 
 ---
 
-## JSON Ledger Output & Schema
+## Dual Persistence Architecture: CSV Results & Internal JSON State
 
-Recognized license plates are stored in `data/recognized_license_plate_records.json`.
+The system separates **final confirmed detection results** from **internal candidate state**:
 
-Each vehicle passage record captures comprehensive metadata, including per-character confidence scores, format classifications, bounding coordinates, and review requirements:
+```
+[ Video Ingestion & OCR ] 
+            │
+            ▼
+[ Internal JSON Ledger ] ──> Stores all candidate readings, crops, and trajectories
+            │
+            ▼
+[ Confirmation Engine ] ──> Evaluates multi-frame consistency, format, & char confidences
+            │
+            ├── Insufficient Evidence ──> Retained in JSON only (not exported)
+            │
+            └── Confirmed Plate       ──> [ Confirmed CSV Ledger ] (Final export)
+```
+
+### 1. Final Confirmed Results CSV (`data/confirmed_license_plate_records.csv`)
+
+Only plates meeting strict confirmation criteria are recorded in the CSV file. Each row represents a unique confirmed vehicle passage:
+
+| Column | Type | Example | Description |
+| :--- | :--- | :--- | :--- |
+| `event_id` | `str` | `3b50242d-fbda-...` | UUID linking confirmed record to internal JSON tracking state. |
+| `timestamp` | `str` | `2026-10-28T12:55:02.798Z` | ISO 8601 UTC timestamp of initial detection. |
+| `last_observed_timestamp` | `str` | `2026-10-28T12:55:27.559Z` | ISO 8601 UTC timestamp of most recent observation. |
+| `confirmed_plate_number` | `str` | `GJ01IH8398` | The single confirmed alphanumeric plate number. |
+| `overall_confidence` | `float` | `0.9072` | Mean confidence across characters bounded in $[0.0, 1.0]$. |
+| `character_confidences` | `str` (JSON) | `[{"char":"G","confidence":0.7524},...]` | Compact JSON array of per-character confidences for the confirmed plate. |
+| `min_character_confidence` | `float` | `0.5791` | Lowest individual character score in the plate. |
+| `plate_color` | `str` | `WHITE` | Background color (`WHITE`, `YELLOW`, `GREEN`, `OTHER`). |
+| `matched_country_pattern` | `str` | `IN_STANDARD` | Verified syntax format (`IN_STANDARD`, `GB_STANDARD`, etc.). |
+| `observations_count` | `int` | `22` | Number of distinct video frames contributing to consensus. |
+| `source_id` | `str` | `IMG_8426.MP4` | Video file name, stream URL, or camera index. |
+| `frame_index` | `int` | `3` | Frame number of first observation. |
+| `last_frame_index` | `int` | `72` | Frame number of last observation in passage. |
+| `review_required` | `str` | `I` | Disputed or low-confidence characters flagged for review. |
+
+#### Example CSV Output Row
+
+```csv
+event_id,timestamp,last_observed_timestamp,confirmed_plate_number,overall_confidence,character_confidences,min_character_confidence,plate_color,matched_country_pattern,observations_count,source_id,frame_index,last_frame_index,review_required
+3b50242d-fbda-49f8-a269-ea27d19e2972,2026-10-28T12:55:02.798Z,2026-10-28T12:55:27.559Z,GJ01IH8398,0.9072,"[{""char"":""G"",""confidence"":0.7524},{""char"":""J"",""confidence"":0.9979},{""char"":""0"",""confidence"":0.8101},{""char"":""1"",""confidence"":0.9969},{""char"":""I"",""confidence"":0.5791},{""char"":""H"",""confidence"":0.9991},{""char"":""8"",""confidence"":0.9408},{""char"":""3"",""confidence"":0.9997},{""char"":""9"",""confidence"":0.9977},{""char"":""8"",""confidence"":0.9987}]",0.5791,WHITE,IN_STANDARD,22,IMG_8426.MP4,3,72,I
+```
+
+### 2. Internal JSON Tracking State (`data/recognized_license_plate_records.json`)
+
+The JSON ledger maintains complete internal diagnostic telemetry across all video frames:
+
+- Detailed candidate histories (`candidate_readings`) with individual frame numbers and sharpness scores.
+- Unconfirmed passages that are still collecting evidence.
+- Full spatial bounding box coordinates `[x1, y1, x2, y2]`.
+
+### 1. Final Confirmed Results CSV (`data/confirmed_license_plate_records.csv`)
+
+Only plates meeting strict confirmation criteria are recorded in the CSV file. Each row represents a unique confirmed vehicle passage:
+
+| Column | Type | Example | Description |
+| :--- | :--- | :--- | :--- |
+| `event_id` | `str` | `3b50242d-fbda-...` | UUID linking confirmed record to internal JSON tracking state. |
+| `timestamp` | `str` | `2026-10-28T12:55:02.798Z` | ISO 8601 UTC timestamp of initial detection. |
+| `last_observed_timestamp` | `str` | `2026-10-28T12:55:27.559Z` | ISO 8601 UTC timestamp of most recent observation. |
+| `confirmed_plate_number` | `str` | `GJ01IH8398` | The single confirmed alphanumeric plate number. |
+| `overall_confidence` | `float` | `0.9072` | Mean confidence across characters bounded in $[0.0, 1.0]$. |
+| `character_confidences` | `str` (JSON) | `[{"char":"G","confidence":0.7524},...]` | Compact JSON array of per-character confidences for the confirmed plate. |
+| `min_character_confidence` | `float` | `0.5791` | Lowest individual character score in the plate. |
+| `plate_color` | `str` | `WHITE` | Background color (`WHITE`, `YELLOW`, `GREEN`, `OTHER`). |
+| `matched_country_pattern` | `str` | `IN_STANDARD` | Verified syntax format (`IN_STANDARD`, `GB_STANDARD`, etc.). |
+| `observations_count` | `int` | `22` | Number of distinct video frames contributing to consensus. |
+| `source_id` | `str` | `IMG_8426.MP4` | Video file name, stream URL, or camera index. |
+| `frame_index` | `int` | `3` | Frame number of first observation. |
+| `last_frame_index` | `int` | `72` | Frame number of last observation in passage. |
+| `review_required` | `str` | `I` | Disputed or low-confidence characters flagged for review. |
+
+#### Example CSV Output Row:
+```csv
+event_id,timestamp,last_observed_timestamp,confirmed_plate_number,overall_confidence,character_confidences,min_character_confidence,plate_color,matched_country_pattern,observations_count,source_id,frame_index,last_frame_index,review_required
+3b50242d-fbda-49f8-a269-ea27d19e2972,2026-10-28T12:55:02.798Z,2026-10-28T12:55:27.559Z,GJ01IH8398,0.9072,"[{""char"":""G"",""confidence"":0.7524},{""char"":""J"",""confidence"":0.9979},{""char"":""0"",""confidence"":0.8101},{""char"":""1"",""confidence"":0.9969},{""char"":""I"",""confidence"":0.5791},{""char"":""H"",""confidence"":0.9991},{""char"":""8"",""confidence"":0.9408},{""char"":""3"",""confidence"":0.9997},{""char"":""9"",""confidence"":0.9977},{""char"":""8"",""confidence"":0.9987}]",0.5791,WHITE,IN_STANDARD,22,IMG_8426.MP4,3,72,I
+```
+
+### 2. Internal JSON Tracking State (`data/recognized_license_plate_records.json`)
+
+The JSON ledger maintains complete internal diagnostic telemetry across all video frames:
+- Detailed candidate histories (`candidate_readings`) with individual frame numbers and sharpness scores.
+- Unconfirmed passages that are still collecting evidence.
+- Full spatial bounding box coordinates `[x1, y1, x2, y2]`.
 
 ```json
 {
@@ -387,6 +470,19 @@ System behavior is configured via [`config/license_plate_recognition_config.json
       }
     ]
   },
+  "confirmation": {
+    "min_observations": 2,
+    "min_confidence": 0.55,
+    "single_frame_min_confidence": 0.88,
+    "min_char_confidence": 0.20,
+    "max_review_chars": 3,
+    "unvalidated_min_confidence": 0.70,
+    "unvalidated_min_observations": 3
+  },
+  "persistence": {
+    "ledger_path": "data/recognized_license_plate_records.json",
+    "confirmed_csv_path": "data/confirmed_license_plate_records.csv"
+  },
   "deduplication": {
     "cooldown_seconds": 30.0
   },
@@ -411,6 +507,7 @@ Two-wheelers and commercial carriers often use squarish two-line plates (aspect 
 ### 2. Multi-Frame Trajectory Matching & Sharpness Weighting
 
 Instead of relying on a single snapshot:
+
 - Vehicles are tracked across frames using spatial IoU, center distance, and prefix matching.
 - Every frame calculates Laplacian variance ($s = \text{Var}(\nabla^2 I)$). Sharp, close-up frames naturally outvote distant, motion-blurred frames.
 - National pattern matches receive structural bonuses to eliminate noise from random background textures.
