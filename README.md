@@ -195,4 +195,6 @@ These are potential enhancements, not claims that every item is already implemen
 
 ## License
 
-Add the project's selected open-source license here before distributing the code. Verify the licensing terms of the detection model, OCR engine, and model weights separately.
+This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). See the [LICENSE](LICENSE) file for the full license terms.
+
+Third-party libraries, detection models, OCR engines, and model weights may have separate license terms. Refer to their respective licenses for details.
