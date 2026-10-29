@@ -1,10 +1,28 @@
+# Environment and Dependencies
 .env
-/tests/
-/scratch/
-.pytest_cache/
-__pycache__/
 .venv/
+env/
+venv/
 
-# Ignore generated test results
-/data/test_8414_run.csv
-/data/test_8426_run.csv
+# Python / Pytest Caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+/tests/
+
+# Scratch and Temporary Files
+/scratch/
+
+# Dataset and Training Artifacts
+datasets/
+runs/
+*.cache
+yolov8*.pt
+
+# Model checkpoints (ignore newly trained local checkpoints to keep repo lean)
+models/two_wheeler_detector_*.pt
+
+# Generated Test and Run Outputs
+/data/test_*.csv
+/data/test_*.json
